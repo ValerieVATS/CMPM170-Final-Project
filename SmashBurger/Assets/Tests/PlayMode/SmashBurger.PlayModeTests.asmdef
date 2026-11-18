@@ -1,0 +1,6 @@
+{
+    "name": "SmashBurger.PlayModeTests",
+    "references": ["SmashBurger.Runtime", "Unity.InputSystem"],
+    "optionalUnityReferences": ["TestAssemblies"],
+    "autoReferenced": false
+}

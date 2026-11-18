@@ -1,0 +1,5 @@
+{
+    "name": "SmashBurger.Runtime",
+    "references": ["Unity.InputSystem"],
+    "autoReferenced": true
+}
