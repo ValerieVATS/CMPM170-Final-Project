@@ -8,23 +8,26 @@ namespace SmashBurger
     public sealed class BreakoutBall : MonoBehaviour
     {
         public FoodState State { get; private set; }
+        public IngredientKind Ingredient { get; private set; }
         public Rigidbody2D Body { get; private set; }
-        public PattyRack Source { get; private set; }
+        public IngredientRack Source { get; private set; }
         public bool IsHeld { get; private set; }
         public float Radius => State == FoodState.Knockdown ? 0.19f : 0.29f;
 
         private BurgerBreakout game;
-        private SpriteRenderer face;
+        private GameObject art;
         private SpriteRenderer ring;
         private TrailRenderer trail;
         private float lastPaddleHit = -1f;
         private bool retiring;
 
-        public void Initialize(BurgerBreakout owner, FoodState state, PattyRack source = null)
+        public void Initialize(BurgerBreakout owner, FoodState state, IngredientRack source = null,
+            IngredientKind ingredient = IngredientKind.Meat)
         {
             game = owner;
             State = state;
             Source = source;
+            Ingredient = state == FoodState.Knockdown ? IngredientKind.Pickle : ingredient;
             Body = GetComponent<Rigidbody2D>();
             Body.gravityScale = 0;
             Body.freezeRotation = true;
@@ -35,18 +38,6 @@ namespace SmashBurger
 
             ring = game.Shape("Outline", transform, Vector2.zero,
                 Vector2.one * (Radius * 2f + 0.07f), BurgerBreakout.Cream, true, 9);
-            face = game.Shape("Ball", transform, Vector2.zero,
-                Vector2.one * Radius * 2f, Color.white, true, 10);
-            if (state != FoodState.Knockdown)
-            {
-                for (int i = -1; i <= 1; i++)
-                {
-                    SpriteRenderer mark = game.Shape("Grill mark", transform,
-                        new Vector2(i * 0.12f, 0), new Vector2(0.035f, 0.31f),
-                        new Color(1, 1, 1, 0.22f), false, 11);
-                    mark.transform.localRotation = Quaternion.Euler(0, 0, -25);
-                }
-            }
 
             trail = gameObject.AddComponent<TrailRenderer>();
             trail.sharedMaterial = game.SpriteMaterial;
@@ -60,13 +51,19 @@ namespace SmashBurger
 
         private void Paint()
         {
-            Color color = State == FoodState.Knockdown ? BurgerBreakout.Green
-                : State == FoodState.Raw ? BurgerBreakout.RawRed : Color.black;
-            face.color = color;
-            ring.color = State == FoodState.Cooked ? BurgerBreakout.Cream : color * 0.65f;
+            bool prepared = State == FoodState.Cooked;
+            Color color = IngredientInfo.ColorFor(Ingredient, prepared);
+            ring.color = prepared ? BurgerBreakout.Cream : color * 0.65f;
             trail.startColor = new Color(color.r, color.g, color.b, 0.45f);
             trail.endColor = new Color(color.r, color.g, color.b, 0);
-            gameObject.name = State + " ball";
+            gameObject.name = IngredientInfo.Name(Ingredient) + " (" + State + ")";
+
+            if (art != null)
+            {
+                art.SetActive(false);
+                Destroy(art);
+            }
+            art = IngredientArt.Build(game, transform, Ingredient, Radius * 2f, prepared, 10);
         }
 
         public void Hold()
@@ -96,9 +93,10 @@ namespace SmashBurger
             if (State != FoodState.Raw || retiring || IsHeld) return;
             State = FoodState.Cooked;
             Paint();
-            // Eject toward the paddle so the cooked patty presents a second aiming task.
+            // Eject toward the paddle so the cooked ingredient presents a second aiming task.
             Body.linearVelocity = new Vector2(inwardDirection * 0.8f, -0.6f) * game.SpeedFor(State);
-            game.Feedback("COOKED — aim the black patty at a bun", BurgerBreakout.Gold);
+            game.Feedback(IngredientInfo.Label(Ingredient, true) + " — aim it at a bun",
+                IngredientInfo.ColorFor(Ingredient, true));
         }
 
         private void FixedUpdate()
@@ -112,7 +110,7 @@ namespace SmashBurger
 
             Vector2 direction = Body.linearVelocity.normalized;
             if (direction.sqrMagnitude < 0.01f) direction = Vector2.up;
-            // Prevent endless near-horizontal rallies; keep food and green balls predictable.
+            // Prevent endless near-horizontal rallies; keep food and the launcher predictable.
             if (Mathf.Abs(direction.y) < 0.22f)
                 direction = new Vector2(direction.x, direction.y < 0 ? -0.22f : 0.22f).normalized;
             Body.linearVelocity = direction * game.SpeedFor(State);

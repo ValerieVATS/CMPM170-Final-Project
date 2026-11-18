@@ -2,20 +2,21 @@ using UnityEngine;
 
 namespace SmashBurger
 {
-    public sealed class PattyRack : MonoBehaviour
+    public sealed class IngredientRack : MonoBehaviour
     {
+        public IngredientKind Ingredient { get; private set; }
+
         private BurgerBreakout game;
-        private SpriteRenderer patty;
+        private GameObject art;
         private Collider2D hitbox;
         public bool IsStocked => hitbox != null && hitbox.enabled;
 
-        public void Initialize(BurgerBreakout owner)
+        public void Initialize(BurgerBreakout owner, IngredientKind ingredient = IngredientKind.Meat)
         {
             game = owner;
-            patty = game.Shape("Raw patty", transform, Vector2.zero,
-                Vector2.one * 0.62f, BurgerBreakout.RawRed, true, 3);
-            game.Shape("Patty highlight", transform, new Vector2(-0.10f, 0.11f),
-                new Vector2(0.17f, 0.065f), new Color(1, 0.6f, 0.5f, 0.65f), true, 4);
+            Ingredient = ingredient;
+            art = IngredientArt.Build(game, transform, ingredient, 0.62f, false, 3);
+            gameObject.name = "Ingredient rack (" + IngredientInfo.Name(ingredient) + ")";
             hitbox = gameObject.AddComponent<CircleCollider2D>();
             ((CircleCollider2D)hitbox).radius = 0.34f;
             hitbox.sharedMaterial = game.BounceMaterial;
@@ -29,21 +30,22 @@ namespace SmashBurger
 
         public bool TryKnockDown()
         {
-            if (!IsStocked || game.ActivePattyCount >= game.MaxActivePatties) return false;
+            if (!IsStocked || game.ActiveIngredientCount >= game.MaxActiveIngredients) return false;
             hitbox.enabled = false;
-            foreach (SpriteRenderer image in GetComponentsInChildren<SpriteRenderer>()) image.enabled = false;
+            art.SetActive(false);
             BreakoutBall ball = game.SpawnBall(FoodState.Raw,
-                (Vector2)transform.position + Vector2.down * 0.48f, this);
+                (Vector2)transform.position + Vector2.down * 0.48f, this, Ingredient);
             // A gentle, deterministic drop makes the first redirect readable.
             ball.Launch(new Vector2(-Mathf.Sign(transform.position.x) * 0.15f, -1));
-            game.Feedback("RAW PATTY — bank it into either side cooker", BurgerBreakout.RawRed);
+            game.Feedback(IngredientInfo.Label(Ingredient, false) + " — bank it into either side cooker",
+                IngredientInfo.ColorFor(Ingredient, FoodState.Raw));
             return true;
         }
 
         public void Restock()
         {
             hitbox.enabled = true;
-            foreach (SpriteRenderer image in GetComponentsInChildren<SpriteRenderer>()) image.enabled = true;
+            art.SetActive(true);
         }
     }
 }

@@ -167,12 +167,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b4da0a45df08467fbafec88d94aad9ce, type: 3}
   m_Name:
   m_EditorClassIdentifier:
-  maxActivePatties: 3
+  maxActiveIngredients: 3
   maxBounceAngle: 68
   paddleWidth: 2.2
   paddleSpeed: 16
-  greenBallSpeed: 8
-  pattySpeed: 6
+  launcherSpeed: 8
+  ingredientSpeed: 6
   showAimGuide: 1
 --- !u!1 &519420028
 GameObject:

@@ -15,25 +15,25 @@ namespace SmashBurger
         private static readonly Color Steel = new Color32(47, 65, 71, 255);
 
         [Header("Aiming playtest settings")]
-        [SerializeField, Min(1)] private int maxActivePatties = 3;
+        [SerializeField, Min(1)] private int maxActiveIngredients = 3;
         [SerializeField, Range(35, 75)] private float maxBounceAngle = 68;
         [SerializeField, Range(1, 4)] private float paddleWidth = 2.2f;
         [SerializeField, Min(1)] private float paddleSpeed = 16;
-        [SerializeField, Min(1)] private float greenBallSpeed = 8;
-        [SerializeField, Min(1)] private float pattySpeed = 6;
+        [SerializeField, Min(1)] private float launcherSpeed = 8;
+        [SerializeField, Min(1)] private float ingredientSpeed = 6;
         [SerializeField] private bool showAimGuide = true;
 
-        public int MaxActivePatties => maxActivePatties;
-        public int ActivePattyCount { get; private set; }
+        public int MaxActiveIngredients => maxActiveIngredients;
+        public int ActiveIngredientCount { get; private set; }
         public BoxCollider2D PaddleCollider { get; private set; }
         public Vector2 PaddlePosition => paddle.position;
         public PhysicsMaterial2D BounceMaterial { get; private set; }
         public Material SpriteMaterial { get; private set; }
-        public BreakoutBall GreenBall { get; private set; }
-        public BreakoutBall CaughtPatty { get; private set; }
+        public BreakoutBall LauncherBall { get; private set; }
+        public BreakoutBall CaughtIngredient { get; private set; }
 
         private readonly List<BreakoutBall> balls = new List<BreakoutBall>();
-        private readonly List<PattyRack> racks = new List<PattyRack>();
+        private readonly List<IngredientRack> racks = new List<IngredientRack>();
         private readonly List<Object> generatedAssets = new List<Object>();
         private Rigidbody2D paddle;
         private Transform world;
@@ -46,7 +46,7 @@ namespace SmashBurger
         private bool catchHeld;
         private Vector2 aimDirection = Vector2.up;
         private Vector2 lastMousePosition;
-        private string message = "Launch the green ball to knock a red patty off the rack.";
+        private string message = "Launch the pickle to knock an ingredient off the rack.";
         private Color messageColor;
         private float messageUntil;
         private GUIStyle titleStyle, textStyle, smallStyle;
@@ -171,7 +171,7 @@ namespace SmashBurger
                 for (int i = -3; i <= 3; i++)
                     Shape("Grill", chamber.transform, new Vector2(0, i * 0.27f), new Vector2(1.05f, 0.055f), new Color32(190, 100, 43, 255), false, 2);
                 Label("COOK", chamber.transform, new Vector2(0, 1.55f), 0.13f, Gold);
-                Label("RED\nTO BLACK", chamber.transform, new Vector2(0, -1.65f), 0.095f, Cream);
+                Label("RAW\nTO READY", chamber.transform, new Vector2(0, -1.65f), 0.095f, Cream);
             }
 
             for (int row = 0; row < 2; row++)
@@ -180,11 +180,13 @@ namespace SmashBurger
                 Shape("Ingredient shelf", world, new Vector2(0, y - 0.42f), new Vector2(12.4f, 0.08f), Steel);
                 for (int col = 0; col < 7; col++)
                 {
-                    GameObject slot = new GameObject("Raw patty rack " + row + "/" + col);
-                    slot.transform.SetParent(world, false);
-                    slot.transform.localPosition = new Vector2(-5.4f + col * 1.8f, y);
-                    PattyRack rack = slot.AddComponent<PattyRack>();
-                    rack.Initialize(this);
+                    int slot = row * 7 + col;
+                    IngredientKind ingredient = IngredientInfo.ForRackSlot(slot);
+                    GameObject rackObject = new GameObject("Ingredient rack " + row + "/" + col);
+                    rackObject.transform.SetParent(world, false);
+                    rackObject.transform.localPosition = new Vector2(-5.4f + col * 1.8f, y);
+                    IngredientRack rack = rackObject.AddComponent<IngredientRack>();
+                    rack.Initialize(this, ingredient);
                     racks.Add(rack);
                 }
             }
@@ -198,7 +200,7 @@ namespace SmashBurger
                 Shape("Lettuce", target.transform, new Vector2(0, -0.14f), new Vector2(1.5f, 0.065f), Green, false, 4);
                 for (int seed = -1; seed <= 1; seed++)
                     Shape("Sesame", target.transform, new Vector2(seed * 0.3f, 0.10f), new Vector2(0.09f, 0.035f), Cream, true, 4);
-                Label("SERVE BLACK", target.transform, new Vector2(0, 0.43f), 0.075f, Cream);
+                Label("SERVE READY", target.transform, new Vector2(0, 0.43f), 0.075f, Cream);
                 BoxCollider2D hitbox = target.AddComponent<BoxCollider2D>();
                 hitbox.size = new Vector2(1.65f, 0.55f);
                 hitbox.sharedMaterial = BounceMaterial;
@@ -233,21 +235,22 @@ namespace SmashBurger
             guide.positionCount = 3;
         }
 
-        public float SpeedFor(FoodState state) => state == FoodState.Knockdown ? greenBallSpeed : pattySpeed;
+        public float SpeedFor(FoodState state) => state == FoodState.Knockdown ? launcherSpeed : ingredientSpeed;
 
-        public BreakoutBall SpawnBall(FoodState state, Vector2 position, PattyRack source = null)
+        public BreakoutBall SpawnBall(FoodState state, Vector2 position, IngredientRack source = null,
+            IngredientKind ingredient = IngredientKind.Meat)
         {
             GameObject item = new GameObject(state + " ball");
             item.transform.SetParent(world, false);
             item.transform.position = position;
             BreakoutBall ball = item.AddComponent<BreakoutBall>();
-            ball.Initialize(this, state, source);
+            ball.Initialize(this, state, source, ingredient);
             // Independent balls should not randomly spoil each other's carefully aimed shots.
             foreach (BreakoutBall other in balls)
                 if (other != null) Physics2D.IgnoreCollision(ball.GetComponent<Collider2D>(), other.GetComponent<Collider2D>());
             balls.Add(ball);
-            if (state == FoodState.Knockdown) GreenBall = ball;
-            else ActivePattyCount++;
+            if (state == FoodState.Knockdown) LauncherBall = ball;
+            else ActiveIngredientCount++;
             return ball;
         }
 
@@ -256,22 +259,22 @@ namespace SmashBurger
             foreach (BreakoutBall ball in balls.ToArray())
                 if (ball != null) ball.Retire();
             balls.Clear();
-            ActivePattyCount = 0;
-            CaughtPatty = null;
-            foreach (PattyRack rack in racks) rack.Restock();
+            ActiveIngredientCount = 0;
+            CaughtIngredient = null;
+            foreach (IngredientRack rack in racks) rack.Restock();
             targetX = 0;
             paddle.position = new Vector2(0, -4.35f);
-            GreenBall = SpawnBall(FoodState.Knockdown, HoldPosition(0.19f));
-            GreenBall.Hold();
-            Feedback("Launch the green ball. Paddle edges give steeper bank shots.", Cream);
+            LauncherBall = SpawnBall(FoodState.Knockdown, HoldPosition(0.19f));
+            LauncherBall.Hold();
+            Feedback("Launch the pickle. Paddle edges give steeper bank shots.", Cream);
         }
 
         public void Forget(BreakoutBall ball)
         {
             balls.Remove(ball);
-            if (ball.State != FoodState.Knockdown) ActivePattyCount = Mathf.Max(0, ActivePattyCount - 1);
-            if (CaughtPatty == ball) CaughtPatty = null;
-            if (GreenBall == ball) GreenBall = null;
+            if (ball.State != FoodState.Knockdown) ActiveIngredientCount = Mathf.Max(0, ActiveIngredientCount - 1);
+            if (CaughtIngredient == ball) CaughtIngredient = null;
+            if (LauncherBall == ball) LauncherBall = null;
         }
 
         public void Lose(BreakoutBall ball)
@@ -280,12 +283,12 @@ namespace SmashBurger
             {
                 ball.Hold();
                 ball.PlaceHeld(HoldPosition(ball.Radius));
-                Feedback("Green ball ready — click or Space to relaunch.", Green);
+                Feedback("Pickle ready — click or Space to relaunch.", Green);
             }
             else
             {
                 ball.Retire();
-                Feedback("Patty returned to its rack. Try another bank shot.", Cream);
+                Feedback("Ingredient returned to its rack. Try another bank shot.", Cream);
             }
         }
 
@@ -293,9 +296,9 @@ namespace SmashBurger
 
         public void HitPaddle(BreakoutBall ball)
         {
-            if (ball.State != FoodState.Knockdown && catchHeld && CaughtPatty == null)
+            if (ball.State != FoodState.Knockdown && catchHeld && CaughtIngredient == null)
             {
-                CaughtPatty = ball;
+                CaughtIngredient = ball;
                 ball.Hold();
                 ball.PlaceHeld(HoldPosition(ball.Radius));
                 Feedback("CAUGHT — point above the paddle; release to aim", Cream);
@@ -324,20 +327,20 @@ namespace SmashBurger
                 if (keyboard.gKey.wasPressedThisFrame) showAimGuide = !showAimGuide;
             }
             if (move != 0) targetX += move * paddleSpeed * Time.deltaTime;
-            else if (mouseMoved && CaughtPatty == null) targetX = mouseWorld.x;
+            else if (mouseMoved && CaughtIngredient == null) targetX = mouseWorld.x;
             targetX = Mathf.Clamp(targetX, -8.4f + paddleWidth * 0.5f, 8.4f - paddleWidth * 0.5f);
             lastMousePosition = pointer;
 
             aimDirection = mouse != null ? BreakoutAim.Toward(HoldPosition(0.29f), mouseWorld, maxBounceAngle) : Vector2.up;
-            if (CaughtPatty != null && !catchHeld)
+            if (CaughtIngredient != null && !catchHeld)
             {
-                CaughtPatty.Launch(aimDirection);
-                CaughtPatty = null;
+                CaughtIngredient.Launch(aimDirection);
+                CaughtIngredient = null;
             }
             bool launch = (mouse != null && mouse.leftButton.wasPressedThisFrame)
                 || (keyboard != null && keyboard.spaceKey.wasPressedThisFrame);
-            if (launch && GreenBall != null && GreenBall.IsHeld)
-                GreenBall.Launch(BreakoutAim.FromPaddle(0.25f, 1, maxBounceAngle));
+            if (launch && LauncherBall != null && LauncherBall.IsHeld)
+                LauncherBall.Launch(BreakoutAim.FromPaddle(0.25f, 1, maxBounceAngle));
 
             UpdateGuide();
         }
@@ -350,8 +353,15 @@ namespace SmashBurger
 
         private void LateUpdate()
         {
-            if (GreenBall != null && GreenBall.IsHeld) GreenBall.PlaceHeld(HoldPosition(GreenBall.Radius));
-            if (CaughtPatty != null) CaughtPatty.PlaceHeld(HoldPosition(CaughtPatty.Radius));
+            if (LauncherBall != null && LauncherBall.IsHeld) LauncherBall.PlaceHeld(HoldPosition(LauncherBall.Radius));
+            if (CaughtIngredient != null) CaughtIngredient.PlaceHeld(HoldPosition(CaughtIngredient.Radius));
+        }
+
+        private static Color GuideColor(BreakoutBall ball)
+        {
+            return ball.State == FoodState.Cooked
+                ? Cream
+                : IngredientInfo.ColorFor(ball.Ingredient, ball.State);
         }
 
         private void UpdateGuide()
@@ -361,11 +371,11 @@ namespace SmashBurger
             Vector2 origin;
             Vector2 direction;
             Color color;
-            if (CaughtPatty != null)
+            if (CaughtIngredient != null)
             {
-                origin = HoldPosition(CaughtPatty.Radius);
+                origin = HoldPosition(CaughtIngredient.Radius);
                 direction = aimDirection;
-                color = CaughtPatty.State == FoodState.Raw ? RawRed : Cream;
+                color = GuideColor(CaughtIngredient);
             }
             else
             {
@@ -385,7 +395,7 @@ namespace SmashBurger
                 if (next == null) return;
                 origin = next.Body.position + next.Body.linearVelocity * soonest;
                 direction = BreakoutAim.FromPaddle(origin.x - PaddlePosition.x, paddleWidth * 0.5f, maxBounceAngle);
-                color = next.State == FoodState.Knockdown ? Green : next.State == FoodState.Raw ? RawRed : Cream;
+                color = GuideColor(next);
             }
             // One wall-bank preview; ignore targets so the guide stays readable rather than noisy.
             float wall = direction.x > 0 ? 8.28f : -8.28f;
@@ -425,11 +435,11 @@ namespace SmashBurger
             GUI.Label(new Rect(32, 13, 420, 42), "SMASH / BURGER", titleStyle);
             smallStyle.alignment = TextAnchor.MiddleRight;
             smallStyle.normal.textColor = Cream;
-            GUI.Label(new Rect(width - 450, 16, 418, 32), "BREAKOUT × BURGERTIME   /   AIMING PLAYGROUND", smallStyle);
+            GUI.Label(new Rect(width - 450, 16, 418, 32), "BREAKOUT × BURGERTIME   /   INGREDIENT PLAYGROUND", smallStyle);
             smallStyle.alignment = TextAnchor.MiddleCenter;
             textStyle.normal.textColor = Time.time < messageUntil ? messageColor : Cream;
             GUI.Label(new Rect(20, height - 92, width - 40, 30), Time.time < messageUntil ? message :
-                "GREEN knocks down  /  RED goes to a side cooker  /  BLACK goes to a bun", textStyle);
+                "PICKLE knocks ingredients down  /  COOK them in a side chamber  /  SERVE cooked food at a bun", textStyle);
             smallStyle.normal.textColor = new Color32(168, 188, 190, 255);
             GUI.Label(new Rect(20, height - 61, width - 40, 24),
                 "Mouse or A/D / ← →: move     Click / Space: launch     Hold RMB / Shift: catch food, aim & release", smallStyle);
