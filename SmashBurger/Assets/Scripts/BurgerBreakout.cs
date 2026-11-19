@@ -49,6 +49,7 @@ namespace SmashBurger
         private string message = "Launch the pickle to knock an ingredient off the rack.";
         private Color messageColor;
         private float messageUntil;
+        private float elapsed;
         private GUIStyle titleStyle, textStyle, smallStyle;
 
         private void Awake()
@@ -263,6 +264,7 @@ namespace SmashBurger
             CaughtIngredient = null;
             foreach (IngredientRack rack in racks) rack.Restock();
             targetX = 0;
+            elapsed = 0;
             paddle.position = new Vector2(0, -4.35f);
             LauncherBall = SpawnBall(FoodState.Knockdown, HoldPosition(0.19f));
             LauncherBall.Hold();
@@ -310,6 +312,7 @@ namespace SmashBurger
         private void Update()
         {
             FitCamera();
+            elapsed += Time.deltaTime;
             Keyboard keyboard = Keyboard.current;
             Mouse mouse = Mouse.current;
             Vector2 pointer = mouse != null ? mouse.position.ReadValue() : lastMousePosition;
@@ -436,6 +439,18 @@ namespace SmashBurger
             smallStyle.alignment = TextAnchor.MiddleRight;
             smallStyle.normal.textColor = Cream;
             GUI.Label(new Rect(width - 450, 16, 418, 32), "BREAKOUT × BURGERTIME   /   INGREDIENT PLAYGROUND", smallStyle);
+
+            float timeLeft = Mathf.Max(0, 60 - elapsed);
+            int seconds = Mathf.CeilToInt(timeLeft);
+            bool flashRed = timeLeft < 15 && (int)(Time.time * 4) % 2 == 0;
+            titleStyle.normal.textColor = flashRed ? RawRed : Cream;
+            titleStyle.fontSize = 48;
+            titleStyle.alignment = TextAnchor.MiddleCenter;
+            GUI.Label(new Rect(0, 5, width, 60), $"{seconds / 60}:{seconds % 60:00}", titleStyle);
+            titleStyle.fontSize = 27;
+            titleStyle.alignment = TextAnchor.MiddleLeft;
+
+
             smallStyle.alignment = TextAnchor.MiddleCenter;
             textStyle.normal.textColor = Time.time < messageUntil ? messageColor : Cream;
             GUI.Label(new Rect(20, height - 92, width - 40, 30), Time.time < messageUntil ? message :
