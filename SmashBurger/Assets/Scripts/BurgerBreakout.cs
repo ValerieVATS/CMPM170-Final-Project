@@ -50,6 +50,9 @@ namespace SmashBurger
         private Color messageColor;
         private float messageUntil;
         private float elapsed;
+        private enum GameState {Start, Playing, GameOver}
+        private GameState state = GameState.Start;
+        private int finalScore;
         private GUIStyle titleStyle, textStyle, smallStyle;
 
         private void Awake()
@@ -312,7 +315,17 @@ namespace SmashBurger
         private void Update()
         {
             FitCamera();
+            
+            if (state != GameState.Playing) {
+                if (Keyboard.current.spaceKey.wasPressedThisFrame || Mouse.current.leftButton.wasPressedThisFrame) {
+                    Restart();
+                    state = GameState.Playing;
+                }
+                return;
+            }
             elapsed += Time.deltaTime;
+            if (elapsed >= 180) state = GameState.GameOver;
+
             Keyboard keyboard = Keyboard.current;
             Mouse mouse = Mouse.current;
             Vector2 pointer = mouse != null ? mouse.position.ReadValue() : lastMousePosition;
@@ -440,7 +453,7 @@ namespace SmashBurger
             smallStyle.normal.textColor = Cream;
             GUI.Label(new Rect(width - 450, 16, 418, 32), "BREAKOUT × BURGERTIME   /   INGREDIENT PLAYGROUND", smallStyle);
 
-            float timeLeft = Mathf.Max(0, 60 - elapsed);
+            float timeLeft = Mathf.Max(0, 180 - elapsed);
             int seconds = Mathf.CeilToInt(timeLeft);
             bool flashRed = timeLeft < 15 && (int)(Time.time * 4) % 2 == 0;
             titleStyle.normal.textColor = flashRed ? RawRed : Cream;
@@ -460,6 +473,46 @@ namespace SmashBurger
                 "Mouse or A/D / ← →: move     Click / Space: launch     Hold RMB / Shift: catch food, aim & release", smallStyle);
             GUI.Label(new Rect(20, height - 38, width - 40, 24),
                 "G: aim guide " + (showAimGuide ? "ON" : "OFF") + "     R: reset     •     Paddle center = straight / edges = bank shots", smallStyle);
+
+            if (state != GameState.Playing) {
+                GUI.color = new Color32(16, 24, 29, 170);
+                GUI.DrawTexture(new Rect(0, 0, width, height), Texture2D.whiteTexture);
+                GUI.color = Color.white;
+
+                bool start = state == GameState.Start;
+                float y = height * 0.28f;
+                string title = start ? "SMASH BURGER" : "TIME'S UP!";
+                string body = start 
+                    ? "Shoot the pickle to knock food off the center.\n\nAngle your paddle to send each food to the right stove/table.\n\nDeliver before its timer runs out. Faster deliveries earn more points!"
+                    : "FINAL SCORE: " + finalScore;
+                string prompt = start ? "PRESS SPACE OR CLICK TO START" : "PRESS SPACE OR CLICK TO PLAY AGAIN";
+
+                titleStyle.alignment = TextAnchor.MiddleCenter;
+                titleStyle.fontSize = 72;
+                titleStyle.normal.textColor = Color.black;
+                GUI.Label(new Rect(3, y + 3, width, 90), title, titleStyle);
+                titleStyle.normal.textColor = Gold;
+                GUI.Label(new Rect(0, y, width, 90), title, titleStyle);
+
+                textStyle.fontStyle = FontStyle.Bold;
+                textStyle.fontSize = start ? 26 : 48;
+                textStyle.normal.textColor = Color.black;
+                GUI.Label(new Rect(3, y + 73, width, 280), body, textStyle);
+                textStyle.normal.textColor = Cream;
+                GUI.Label(new Rect(0, y + 70, width, 280), body, textStyle);
+
+                textStyle.fontSize = 28;
+                textStyle.normal.textColor = Color.black;
+                GUI.Label(new Rect(3, y + 403, width, 40), prompt, textStyle);
+                textStyle.normal.textColor = Green;
+                GUI.Label(new Rect(0, y + 403, width, 40), prompt, textStyle);
+
+                titleStyle.alignment = TextAnchor.MiddleLeft;
+                titleStyle.fontSize = 27;
+                textStyle.fontStyle = FontStyle.Normal;
+                textStyle.fontSize = 16;
+            }
+
             GUI.matrix = previous;
         }
 
