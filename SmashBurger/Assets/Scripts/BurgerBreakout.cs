@@ -31,6 +31,7 @@ namespace SmashBurger
         public Material SpriteMaterial { get; private set; }
         public BreakoutBall LauncherBall { get; private set; }
         public BreakoutBall CaughtIngredient { get; private set; }
+        public ScoringSystem Scoring { get; private set; }
 
         private readonly List<BreakoutBall> balls = new List<BreakoutBall>();
         private readonly List<IngredientRack> racks = new List<IngredientRack>();
@@ -50,7 +51,7 @@ namespace SmashBurger
         private Color messageColor;
         private float messageUntil;
         private float elapsed;
-        private GUIStyle titleStyle, textStyle, smallStyle;
+        private GUIStyle titleStyle, textStyle, smallStyle, scoreStyle;
 
         private void Awake()
         {
@@ -75,6 +76,7 @@ namespace SmashBurger
             square = MakeSprite(false);
             circle = MakeSprite(true);
             font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            Scoring = gameObject.AddComponent<ScoringSystem>();
             BuildCourt();
             Restart();
         }
@@ -257,6 +259,7 @@ namespace SmashBurger
 
         public void Restart()
         {
+            if (Scoring != null) Scoring.ResetScore();
             foreach (BreakoutBall ball in balls.ToArray())
                 if (ball != null) ball.Retire();
             balls.Clear();
@@ -428,6 +431,7 @@ namespace SmashBurger
                 titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 27, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
                 textStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, alignment = TextAnchor.MiddleCenter };
                 smallStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
+                scoreStyle = new GUIStyle(GUI.skin.label) { fontSize = 24, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight };
             }
             float scale = Mathf.Min(Screen.width / 1280f, Screen.height / 820f);
             Matrix4x4 previous = GUI.matrix;
@@ -439,6 +443,8 @@ namespace SmashBurger
             smallStyle.alignment = TextAnchor.MiddleRight;
             smallStyle.normal.textColor = Cream;
             GUI.Label(new Rect(width - 450, 16, 418, 32), "BREAKOUT × BURGERTIME   /   INGREDIENT PLAYGROUND", smallStyle);
+            scoreStyle.normal.textColor = Gold;
+            GUI.Label(new Rect(width - 450, 48, 418, 34), "SCORE  " + Scoring.finalScore, scoreStyle);
 
             float timeLeft = Mathf.Max(0, 60 - elapsed);
             int seconds = Mathf.CeilToInt(timeLeft);
