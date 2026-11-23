@@ -12,9 +12,11 @@ namespace SmashBurger
         public Rigidbody2D Body { get; private set; }
         public IngredientRack Source { get; private set; }
         public bool IsHeld { get; private set; }
+        public bool hasPaddleBounceSinceCooking { get; private set; }
         public float Radius => State == FoodState.Knockdown ? 0.19f : 0.29f;
 
         private BurgerBreakout game;
+        private CircleCollider2D hitbox;
         private GameObject art;
         private SpriteRenderer ring;
         private TrailRenderer trail;
@@ -33,8 +35,9 @@ namespace SmashBurger
             Body.freezeRotation = true;
             Body.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
             Body.interpolation = RigidbodyInterpolation2D.Interpolate;
-            GetComponent<CircleCollider2D>().radius = Radius;
-            GetComponent<CircleCollider2D>().sharedMaterial = game.BounceMaterial;
+            hitbox = GetComponent<CircleCollider2D>();
+            hitbox.radius = Radius;
+            hitbox.sharedMaterial = game.BounceMaterial;
 
             ring = game.Shape("Outline", transform, Vector2.zero,
                 Vector2.one * (Radius * 2f + 0.07f), BurgerBreakout.Cream, true, 9);
@@ -84,19 +87,25 @@ namespace SmashBurger
         {
             IsHeld = false;
             Body.simulated = true;
+            // Reapply after every hold: disabling physics can clear per-collider ignore pairs.
+            if (State == FoodState.Knockdown) game.IgnoreTableCollisions(hitbox);
             Body.linearVelocity = direction.normalized * game.SpeedFor(State);
             trail.Clear();
         }
 
-        public void Cook(float inwardDirection)
+        public void Cook()
         {
             if (State != FoodState.Raw || retiring || IsHeld) return;
             State = FoodState.Cooked;
+            hasPaddleBounceSinceCooking = false;
             Paint();
-            // Eject toward the paddle so the cooked ingredient presents a second aiming task.
-            Body.linearVelocity = new Vector2(inwardDirection * 0.8f, -0.6f) * game.SpeedFor(State);
-            game.Feedback(IngredientInfo.Label(Ingredient, true) + " — aim it at a bun",
+            game.Feedback(IngredientInfo.Label(Ingredient, true) + " — aim for the matching table",
                 IngredientInfo.ColorFor(Ingredient, true));
+        }
+
+        public void MarkPaddleBounce()
+        {
+            if (State == FoodState.Cooked) hasPaddleBounceSinceCooking = true;
         }
 
         private void FixedUpdate()

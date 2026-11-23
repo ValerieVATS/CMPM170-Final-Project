@@ -4,7 +4,7 @@ using UnityEngine.InputSystem;
 
 namespace SmashBurger
 {
-    /// <summary>A self-contained, endless aiming playground. All artwork is generated at runtime.</summary>
+    /// <summary>A self-contained, endless serving game. All artwork is generated at runtime.</summary>
     public sealed class BurgerBreakout : MonoBehaviour
     {
         public const float DrainY = -5.65f;
@@ -22,7 +22,11 @@ namespace SmashBurger
         [SerializeField, Min(1)] private float launcherSpeed = 8;
         [SerializeField, Min(1)] private float ingredientSpeed = 6;
         [SerializeField] private bool showAimGuide = true;
+        [Header("Dining table orders")]
+        [SerializeField, Min(0.1f)] private float tableOrderDuration = 20f;
 
+        public int finalScore { get; private set; }
+        public int failedOrders { get; private set; }
         public int MaxActiveIngredients => maxActiveIngredients;
         public int ActiveIngredientCount { get; private set; }
         public BoxCollider2D PaddleCollider { get; private set; }
@@ -35,6 +39,7 @@ namespace SmashBurger
 
         private readonly List<BreakoutBall> balls = new List<BreakoutBall>();
         private readonly List<IngredientRack> racks = new List<IngredientRack>();
+        private readonly List<DiningTable> tables = new List<DiningTable>();
         private readonly List<Object> generatedAssets = new List<Object>();
         private Rigidbody2D paddle;
         private Transform world;
@@ -50,7 +55,6 @@ namespace SmashBurger
         private string message = "Launch the pickle to knock an ingredient off the rack.";
         private Color messageColor;
         private float messageUntil;
-        private float elapsed;
         private GUIStyle titleStyle, textStyle, smallStyle, scoreStyle;
 
         private void Awake()
@@ -123,7 +127,7 @@ namespace SmashBurger
             return image;
         }
 
-        private void Label(string text, Transform parent, Vector2 position, float size, Color color)
+        public TextMesh Label(string text, Transform parent, Vector2 position, float size, Color color)
         {
             GameObject item = new GameObject(text);
             item.transform.SetParent(parent, false);
@@ -139,6 +143,7 @@ namespace SmashBurger
             MeshRenderer renderer = item.GetComponent<MeshRenderer>();
             renderer.sharedMaterial = font.material;
             renderer.sortingOrder = 6;
+            return label;
         }
 
         private void Wall(string name, Vector2 position, Vector2 size)
@@ -163,20 +168,6 @@ namespace SmashBurger
             Shape("Drain", world, new Vector2(0, -5.25f), new Vector2(16.8f, 0.035f), Steel);
             Label("MISSED FOOD RETURNS TO THE RACK", world, new Vector2(0, -5.02f), 0.065f, new Color32(121, 148, 153, 255));
 
-            for (int side = -1; side <= 1; side += 2)
-            {
-                GameObject chamber = new GameObject(side < 0 ? "Left cooking chamber" : "Right cooking chamber");
-                chamber.transform.SetParent(world, false);
-                chamber.transform.localPosition = new Vector2(side * 7.8f, 0.25f);
-                chamber.AddComponent<CookingChamber>().Initialize(-side);
-                Shape("Cooker rim", chamber.transform, Vector2.zero, new Vector2(1.38f, 2.5f), Gold);
-                Shape("Cooking zone", chamber.transform, Vector2.zero, new Vector2(1.22f, 2.32f), new Color32(85, 48, 31, 255), false, 1);
-                for (int i = -3; i <= 3; i++)
-                    Shape("Grill", chamber.transform, new Vector2(0, i * 0.27f), new Vector2(1.05f, 0.055f), new Color32(190, 100, 43, 255), false, 2);
-                Label("COOK", chamber.transform, new Vector2(0, 1.55f), 0.13f, Gold);
-                Label("RAW\nTO READY", chamber.transform, new Vector2(0, -1.65f), 0.095f, Cream);
-            }
-
             for (int row = 0; row < 2; row++)
             {
                 float y = 2.65f + row * 1.05f;
@@ -194,20 +185,19 @@ namespace SmashBurger
                 }
             }
 
-            for (int i = -1; i <= 1; i++)
+            // Four tables on each side leave a clear gap in the middle for bank shots.
+            float[] tableHeights = { 4.25f, 2.25f, -2.2f, -3.6f };
+            foreach (int side in new[] { -1, 1 })
             {
-                GameObject target = new GameObject("Bun serving target");
-                target.transform.SetParent(world, false);
-                target.transform.localPosition = new Vector2(i * 4.6f, 4.8f);
-                SpriteRenderer bun = Shape("Bun", target.transform, Vector2.zero, new Vector2(1.6f, 0.55f), Gold, true, 3);
-                Shape("Lettuce", target.transform, new Vector2(0, -0.14f), new Vector2(1.5f, 0.065f), Green, false, 4);
-                for (int seed = -1; seed <= 1; seed++)
-                    Shape("Sesame", target.transform, new Vector2(seed * 0.3f, 0.10f), new Vector2(0.09f, 0.035f), Cream, true, 4);
-                Label("SERVE READY", target.transform, new Vector2(0, 0.43f), 0.075f, Cream);
-                BoxCollider2D hitbox = target.AddComponent<BoxCollider2D>();
-                hitbox.size = new Vector2(1.65f, 0.55f);
-                hitbox.sharedMaterial = BounceMaterial;
-                target.AddComponent<ServingTarget>().Initialize(this, bun);
+                for (int index = 0; index < tableHeights.Length; index++)
+                {
+                    GameObject tableObject = new GameObject((side < 0 ? "Left" : "Right") + " dining table " + (index + 1));
+                    tableObject.transform.SetParent(world, false);
+                    tableObject.transform.localPosition = new Vector2(side * 7.75f, tableHeights[index]);
+                    DiningTable table = tableObject.AddComponent<DiningTable>();
+                    table.Initialize(this, tableOrderDuration);
+                    tables.Add(table);
+                }
             }
 
             SpriteRenderer paddleImage = Shape("Spatula paddle", world, new Vector2(0, -4.35f),
@@ -265,9 +255,11 @@ namespace SmashBurger
             balls.Clear();
             ActiveIngredientCount = 0;
             CaughtIngredient = null;
+            finalScore = 0;
+            failedOrders = 0;
             foreach (IngredientRack rack in racks) rack.Restock();
+            foreach (DiningTable table in tables) table.ResetOrder();
             targetX = 0;
-            elapsed = 0;
             paddle.position = new Vector2(0, -4.35f);
             LauncherBall = SpawnBall(FoodState.Knockdown, HoldPosition(0.19f));
             LauncherBall.Hold();
@@ -301,6 +293,8 @@ namespace SmashBurger
 
         public void HitPaddle(BreakoutBall ball)
         {
+            if (ball.State == FoodState.Raw) ball.Cook();
+            if (ball.State == FoodState.Cooked) ball.MarkPaddleBounce();
             if (ball.State != FoodState.Knockdown && catchHeld && CaughtIngredient == null)
             {
                 CaughtIngredient = ball;
@@ -312,10 +306,28 @@ namespace SmashBurger
             ball.Launch(BreakoutAim.FromPaddle(ball.Body.position.x - paddle.position.x, paddleWidth * 0.5f, maxBounceAngle));
         }
 
+        public void IgnoreTableCollisions(Collider2D launcherCollider)
+        {
+            foreach (DiningTable table in tables)
+                Physics2D.IgnoreCollision(launcherCollider, table.GetComponent<BoxCollider2D>());
+        }
+
+        public void ScoreDelivery(IngredientKind ingredient, float timeFraction)
+        {
+            int points = 100 + Mathf.RoundToInt(100 * Mathf.Clamp01(timeFraction));
+            finalScore += points;
+            Feedback("SERVED " + IngredientInfo.Name(ingredient).ToUpperInvariant() + "  +" + points, Green);
+        }
+
+        public void FailOrder(IngredientKind ingredient)
+        {
+            failedOrders++;
+            Feedback(IngredientInfo.Name(ingredient).ToUpperInvariant() + " order expired — new order!", RawRed);
+        }
+
         private void Update()
         {
             FitCamera();
-            elapsed += Time.deltaTime;
             Keyboard keyboard = Keyboard.current;
             Mouse mouse = Mouse.current;
             Vector2 pointer = mouse != null ? mouse.position.ReadValue() : lastMousePosition;
@@ -446,26 +458,22 @@ namespace SmashBurger
             scoreStyle.normal.textColor = Gold;
             GUI.Label(new Rect(width - 450, 48, 418, 34), "SCORE  " + Scoring.finalScore, scoreStyle);
 
-            float timeLeft = Mathf.Max(0, 60 - elapsed);
-            int seconds = Mathf.CeilToInt(timeLeft);
-            bool flashRed = timeLeft < 15 && (int)(Time.time * 4) % 2 == 0;
-            titleStyle.normal.textColor = flashRed ? RawRed : Cream;
-            titleStyle.fontSize = 48;
+            titleStyle.normal.textColor = Green;
+            titleStyle.fontSize = 40;
             titleStyle.alignment = TextAnchor.MiddleCenter;
-            GUI.Label(new Rect(0, 5, width, 60), $"{seconds / 60}:{seconds % 60:00}", titleStyle);
+            GUI.Label(new Rect(0, 5, width, 60), "SCORE " + finalScore, titleStyle);
             titleStyle.fontSize = 27;
             titleStyle.alignment = TextAnchor.MiddleLeft;
-
 
             smallStyle.alignment = TextAnchor.MiddleCenter;
             textStyle.normal.textColor = Time.time < messageUntil ? messageColor : Cream;
             GUI.Label(new Rect(20, height - 92, width - 40, 30), Time.time < messageUntil ? message :
-                "PICKLE knocks ingredients down  /  COOK them in a side chamber  /  SERVE cooked food at a bun", textStyle);
+                "PICKLE knocks food down  /  PADDLE cooks it  /  SERVE the matching table order", textStyle);
             smallStyle.normal.textColor = new Color32(168, 188, 190, 255);
             GUI.Label(new Rect(20, height - 61, width - 40, 24),
                 "Mouse or A/D / ← →: move     Click / Space: launch     Hold RMB / Shift: catch food, aim & release", smallStyle);
             GUI.Label(new Rect(20, height - 38, width - 40, 24),
-                "G: aim guide " + (showAimGuide ? "ON" : "OFF") + "     R: reset     •     Paddle center = straight / edges = bank shots", smallStyle);
+                "G: aim guide " + (showAimGuide ? "ON" : "OFF") + "     R: reset     •     Expired orders: " + failedOrders + "     •     Fast, correct deliveries score more", smallStyle);
             GUI.matrix = previous;
         }
 

@@ -37,7 +37,7 @@ namespace SmashBurger
                 (Vector2)transform.position + Vector2.down * 0.48f, this, Ingredient);
             // A gentle, deterministic drop makes the first redirect readable.
             ball.Launch(new Vector2(-Mathf.Sign(transform.position.x) * 0.15f, -1));
-            game.Feedback(IngredientInfo.Label(Ingredient, false) + " — bank it into either side cooker",
+            game.Feedback(IngredientInfo.Label(Ingredient, false) + " — hit the paddle to cook it",
                 IngredientInfo.ColorFor(Ingredient, FoodState.Raw));
             return true;
         }

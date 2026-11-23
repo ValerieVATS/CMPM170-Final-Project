@@ -20,7 +20,7 @@ namespace SmashBurger
             if (ball == null || ball.State == FoodState.Knockdown) return;
             if (ball.State == FoodState.Raw)
             {
-                game.Feedback("STILL RAW — use a side cooker first", BurgerBreakout.RawRed);
+                game.Feedback("STILL RAW — bounce it off the paddle to cook", BurgerBreakout.RawRed);
                 return;
             }
             flash = 0.5f;
