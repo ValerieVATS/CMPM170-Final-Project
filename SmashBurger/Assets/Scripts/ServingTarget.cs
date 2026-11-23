@@ -24,7 +24,14 @@ namespace SmashBurger
                 return;
             }
             flash = 0.5f;
-            game.Feedback("SERVED — the rack is restocked. Keep experimenting!", BurgerBreakout.Green);
+            DeliveryResult result = game.Scoring.Deliver(ball.Ingredient);
+            if (!result.Scored)
+                game.Feedback("SERVED — the rack is restocked. Keep experimenting!", BurgerBreakout.Green);
+            else if (result.Correct)
+                game.Feedback($"SERVED — {IngredientInfo.Name(result.Delivered)} +{result.Points} pts", BurgerBreakout.Green);
+            else
+                game.Feedback($"WRONG ORDER — needed {IngredientInfo.Name(result.Requested)}, {result.Points} pts",
+                    BurgerBreakout.RawRed);
             ball.Retire();
         }
 
