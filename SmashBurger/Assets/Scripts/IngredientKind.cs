@@ -11,6 +11,8 @@ namespace SmashBurger
         private static readonly IngredientKind[] RackMenu =
             { IngredientKind.Meat, IngredientKind.Cheese, IngredientKind.Lettuce, IngredientKind.Tomato, IngredientKind.Onion };
 
+        public static int orderableCount => RackMenu.Length;
+
         public static IngredientKind ForRackSlot(int slot)
         {
             return RackMenu[Mathf.Abs(slot) % RackMenu.Length];
