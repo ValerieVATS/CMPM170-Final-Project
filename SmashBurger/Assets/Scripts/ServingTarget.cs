@@ -30,8 +30,7 @@ namespace SmashBurger
             else if (result.Correct)
                 game.Feedback($"SERVED — {IngredientInfo.Name(result.Delivered)} +{result.Points} pts", BurgerBreakout.Green);
             else
-                game.Feedback($"WRONG ORDER — needed {IngredientInfo.Name(result.Requested)}, {result.Points} pts",
-                    BurgerBreakout.RawRed);
+                game.Feedback($"WRONG ORDER — needed {IngredientInfo.Name(result.Requested)}", BurgerBreakout.RawRed);
             ball.Retire();
         }
 

@@ -26,6 +26,75 @@ namespace SmashBurger.Tests
             for (int i = 0; i < count; i++) yield return new WaitForFixedUpdate();
         }
 
+        [TestCase(600f, "10:00")]
+        [TestCase(599f, "9:59")]
+        [TestCase(59.1f, "1:00")]
+        [TestCase(0.1f, "0:01")]
+        [TestCase(0f, "0:00")]
+        [TestCase(-1f, "0:00")]
+        public void CountdownDisplaysMinutesAndSeconds(float remaining, string expected)
+        {
+            Assert.That(BurgerBreakout.FormatCountdown(remaining), Is.EqualTo(expected));
+        }
+
+        [UnityTest]
+        public IEnumerator MatchTimerStopsPlayAtZeroAndRestartsAtTenMinutes()
+        {
+            float originalTimeScale = Time.timeScale;
+            try
+            {
+                DiningTable table = Object.FindFirstObjectByType<DiningTable>();
+                BreakoutBall served = game.SpawnBall(FoodState.Cooked, new Vector2(0, -2), null, table.requestedIngredient);
+                game.HitPaddle(served);
+                Assert.That(table.TryDeliver(served), Is.True);
+                int finalScore = game.finalScore;
+                Assert.That(finalScore, Is.GreaterThan(0));
+
+                float start = game.matchTimeRemaining;
+                yield return new WaitForSeconds(0.12f);
+                Assert.That(game.matchTimeRemaining, Is.LessThan(start - 0.08f));
+
+                BreakoutBall pending = game.SpawnBall(FoodState.Cooked, new Vector2(0, -2), null, table.requestedIngredient);
+                game.HitPaddle(pending);
+                int orderId = table.currentOrder.id;
+                LineRenderer guide = GameObject.Find("Aim guide").GetComponent<LineRenderer>();
+                guide.enabled = true;
+                FieldInfo elapsed = typeof(BurgerBreakout).GetField("elapsed", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(elapsed, Is.Not.Null);
+                elapsed.SetValue(game, 600f);
+                Time.timeScale = 0.5f;
+                yield return null;
+
+                Assert.That(game.isGameOver, Is.True);
+                Assert.That(game.matchTimeRemaining, Is.Zero);
+                Assert.That(BurgerBreakout.FormatCountdown(game.matchTimeRemaining), Is.EqualTo("0:00"));
+                Assert.That(Time.timeScale, Is.Zero);
+                Assert.That(guide.enabled, Is.False);
+                float tableTime = table.remainingTime;
+                float stoppedTime = Time.time;
+                yield return new WaitForSecondsRealtime(0.06f);
+                Assert.That(Time.time, Is.EqualTo(stoppedTime));
+                Assert.That(table.remainingTime, Is.EqualTo(tableTime));
+                Assert.That(table.currentOrder.id, Is.EqualTo(orderId));
+                Assert.That(table.TryDeliver(pending), Is.False);
+                Assert.That(game.finalScore, Is.EqualTo(finalScore));
+
+                game.Restart();
+                Assert.That(game.isGameOver, Is.False);
+                Assert.That(Time.timeScale, Is.EqualTo(0.5f));
+                Assert.That(game.matchTimeRemaining, Is.EqualTo(600f));
+                Assert.That(game.finalScore, Is.Zero);
+                Assert.That(game.Scoring.ActiveOrders.Count, Is.EqualTo(8));
+                Assert.That(table.currentOrder.id, Is.Not.EqualTo(orderId));
+                Assert.That(game.LauncherBall.IsHeld, Is.True);
+            }
+            finally
+            {
+                if (game != null && game.isGameOver) game.Restart();
+                Time.timeScale = originalTimeScale;
+            }
+        }
+
         [Test]
         public void ContactOffsetProducesPredictableUpwardAim()
         {
@@ -50,11 +119,24 @@ namespace SmashBurger.Tests
             Assert.That(tables.Length, Is.EqualTo(8));
             Assert.That(tables.Count(table => table.transform.position.x < 0), Is.EqualTo(4));
             Assert.That(tables.Count(table => table.transform.position.x > 0), Is.EqualTo(4));
+            Assert.That(game.Scoring, Is.Not.Null);
+            Assert.That(game.Scoring.ActiveOrders.Count, Is.EqualTo(8));
+            Assert.That(tables.Select(table => table.currentOrder.id).Distinct().Count(), Is.EqualTo(8));
+            foreach (int side in new[] { -1, 1 })
+            {
+                float[] heights = tables.Where(table => Mathf.Sign(table.transform.position.x) == side)
+                    .Select(table => table.transform.position.y).OrderBy(height => height).ToArray();
+                Assert.That(heights[0], Is.GreaterThan(-2.5f), "No tables should sit beside the paddle.");
+                for (int i = 1; i < heights.Length; i++)
+                    Assert.That(heights[i] - heights[i - 1], Is.EqualTo(2.2f).Within(0.01f));
+            }
             foreach (DiningTable table in tables)
             {
-                Assert.That(table.orderDuration, Is.EqualTo(20f));
+                Assert.That(table.orderDuration, Is.EqualTo(60f));
                 Assert.That(table.remainingTime, Is.GreaterThan(0));
                 Assert.That(table.requestedIngredient, Is.Not.EqualTo(IngredientKind.Pickle));
+                Assert.That(table.currentOrder.Item, Is.EqualTo(table.requestedIngredient));
+                Assert.That(table.currentOrder.Patience, Is.EqualTo(table.orderDuration));
                 Assert.That(table.transform.Find("White dining table").GetComponent<SpriteRenderer>().color, Is.EqualTo(Color.white));
                 Assert.That(table.transform.Find("Green order timer").GetComponent<SpriteRenderer>().color,
                     Is.EqualTo(BurgerBreakout.Green));
@@ -63,6 +145,9 @@ namespace SmashBurger.Tests
             }
             Assert.That(game.finalScore, Is.Zero);
             Assert.That(game.failedOrders, Is.Zero);
+            Assert.That(game.matchTimeRemaining, Is.InRange(599f, 600f));
+            Assert.That(BurgerBreakout.FormatCountdown(game.matchTimeRemaining), Is.EqualTo("10:00"));
+            Assert.That(game.isGameOver, Is.False);
             Assert.That(game.LauncherBall.State, Is.EqualTo(FoodState.Knockdown));
             Assert.That(game.LauncherBall.Ingredient, Is.EqualTo(IngredientKind.Pickle));
             Assert.That(game.LauncherBall.IsHeld, Is.True);
@@ -147,6 +232,7 @@ namespace SmashBurger.Tests
             Assert.That(ingredient.State, Is.EqualTo(FoodState.Raw));
             Assert.That(rack.IsStocked, Is.False);
 
+            int oldOrderId = table.currentOrder.id;
             game.HitPaddle(ingredient);
             Assert.That(ingredient.State, Is.EqualTo(FoodState.Cooked), "The paddle should cook raw food.");
             Assert.That(ingredient.hasPaddleBounceSinceCooking, Is.True);
@@ -155,22 +241,63 @@ namespace SmashBurger.Tests
             Assert.That(rack.IsStocked, Is.True);
             Assert.That(game.ActiveIngredientCount, Is.Zero);
             Assert.That(game.finalScore, Is.InRange(100, 200));
+            Assert.That(game.Scoring.finalScore, Is.EqualTo(game.finalScore));
+            Assert.That(game.Scoring.DeliveredCount, Is.EqualTo(1));
+            Assert.That(game.Scoring.ActiveOrders.Count, Is.EqualTo(8));
+            Assert.That(table.currentOrder.id, Is.Not.EqualTo(oldOrderId));
             Assert.That(table.requestedIngredient, Is.Not.EqualTo(rack.Ingredient));
-            Assert.That(table.remainingTime, Is.GreaterThan(19));
+            Assert.That(table.remainingTime, Is.GreaterThan(59));
         }
 
         [Test]
-        public void WrongDeliveryKeepsFoodAndRequestWithoutAwardingPoints()
+        public void WrongDeliveryLeavesFoodInPlayAndKeepsRequestAndScore()
         {
             DiningTable table = Object.FindFirstObjectByType<DiningTable>();
             IngredientKind requested = table.requestedIngredient;
+            int orderId = table.currentOrder.id;
             IngredientKind wrong = requested == IngredientKind.Meat ? IngredientKind.Cheese : IngredientKind.Meat;
-            BreakoutBall ingredient = game.SpawnBall(FoodState.Cooked, new Vector2(0, -2), null, wrong);
+            IngredientRack rack = Object.FindObjectsByType<IngredientRack>(FindObjectsSortMode.None)
+                .First(item => item.Ingredient == wrong);
+            Assert.That(rack.TryKnockDown(), Is.True);
+            BreakoutBall ingredient = Object.FindObjectsByType<BreakoutBall>(FindObjectsSortMode.None)
+                .First(ball => ball.State == FoodState.Raw);
             game.HitPaddle(ingredient);
 
             Assert.That(table.TryDeliver(ingredient), Is.False);
-            Assert.That(ingredient != null, Is.True);
+            Assert.That(ingredient.gameObject.activeSelf, Is.True);
+            Assert.That(rack.IsStocked, Is.False);
             Assert.That(table.requestedIngredient, Is.EqualTo(requested));
+            Assert.That(table.currentOrder.id, Is.EqualTo(orderId));
+            Assert.That(game.finalScore, Is.Zero);
+            Assert.That(game.Scoring.finalScore, Is.EqualTo(game.finalScore));
+            Assert.That(game.Scoring.MistakeCount, Is.EqualTo(1));
+            Assert.That(game.Scoring.LastDeliveryPoints, Is.Zero);
+            Assert.That(game.Scoring.ActiveOrders.Count, Is.EqualTo(8));
+            Assert.That(game.ActiveIngredientCount, Is.EqualTo(1));
+        }
+
+        [UnityTest]
+        public IEnumerator WrongBallCollisionBouncesWithoutScoring()
+        {
+            DiningTable table = Object.FindObjectsByType<DiningTable>(FindObjectsSortMode.None)
+                .First(item => item.transform.position.y > 4);
+            IngredientKind requested = table.requestedIngredient;
+            IngredientKind wrong = requested == IngredientKind.Meat ? IngredientKind.Cheese : IngredientKind.Meat;
+            int orderId = table.currentOrder.id;
+            float side = Mathf.Sign(table.transform.position.x);
+            BreakoutBall ingredient = game.SpawnBall(FoodState.Cooked,
+                new Vector2(side * 6.2f, table.transform.position.y), null, wrong);
+            game.HitPaddle(ingredient);
+            ingredient.Launch(Vector2.right * side);
+
+            yield return Steps(12);
+            Assert.That(ingredient != null, Is.True, "Wrong cooked food should stay in play.");
+            Assert.That(ingredient.gameObject.activeSelf, Is.True);
+            Assert.That(ingredient.Body.linearVelocity.x * side, Is.LessThan(0), "Wrong food should bounce off the table.");
+            Assert.That(table.requestedIngredient, Is.EqualTo(requested));
+            Assert.That(table.currentOrder.id, Is.EqualTo(orderId));
+            Assert.That(game.Scoring.MistakeCount, Is.EqualTo(1));
+            Assert.That(game.Scoring.DeliveredCount, Is.Zero);
             Assert.That(game.finalScore, Is.Zero);
             Assert.That(game.ActiveIngredientCount, Is.EqualTo(1));
         }
@@ -189,7 +316,7 @@ namespace SmashBurger.Tests
             yield return Steps(12);
             Assert.That(ingredient == null, Is.True, "A matching cooked ball should score on collision.");
             Assert.That(game.finalScore, Is.GreaterThan(0));
-            Assert.That(table.remainingTime, Is.GreaterThan(19));
+            Assert.That(table.remainingTime, Is.GreaterThan(59));
         }
 
         [UnityTest]
@@ -228,6 +355,27 @@ namespace SmashBurger.Tests
             int slowPoints = game.finalScore - fastPoints;
             Assert.That(fastPoints, Is.GreaterThan(slowPoints));
             Assert.That(slowPoints, Is.GreaterThanOrEqualTo(100));
+            Assert.That(game.Scoring.DeliveredCount, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void WrongDeliveryDoesNotReducePointsAfterAPreviousSuccess()
+        {
+            DiningTable table = Object.FindFirstObjectByType<DiningTable>();
+            BreakoutBall correct = game.SpawnBall(FoodState.Cooked, new Vector2(0, -2), null, table.requestedIngredient);
+            game.HitPaddle(correct);
+            Assert.That(table.TryDeliver(correct), Is.True);
+            int earned = game.finalScore;
+
+            IngredientKind wrong = table.requestedIngredient == IngredientKind.Meat
+                ? IngredientKind.Cheese : IngredientKind.Meat;
+            BreakoutBall incorrect = game.SpawnBall(FoodState.Cooked, new Vector2(0, -2), null, wrong);
+            game.HitPaddle(incorrect);
+            Assert.That(table.TryDeliver(incorrect), Is.False);
+            Assert.That(incorrect.gameObject.activeSelf, Is.True);
+            Assert.That(game.finalScore, Is.EqualTo(earned));
+            Assert.That(game.Scoring.DeliveredCount, Is.EqualTo(1));
+            Assert.That(game.Scoring.MistakeCount, Is.EqualTo(1));
         }
 
         [UnityTest]
@@ -237,6 +385,7 @@ namespace SmashBurger.Tests
             DiningTable expiring = tables[0];
             DiningTable other = tables[1];
             IngredientKind oldRequest = expiring.requestedIngredient;
+            int oldOrderId = expiring.currentOrder.id;
             IngredientKind otherRequest = other.requestedIngredient;
             expiring.orderDuration = 0.35f;
             Transform bar = expiring.transform.Find("Green order timer");
@@ -248,13 +397,17 @@ namespace SmashBurger.Tests
             Assert.That(game.failedOrders, Is.EqualTo(1));
             Assert.That(game.finalScore, Is.Zero);
             Assert.That(expiring.requestedIngredient, Is.Not.EqualTo(oldRequest));
+            Assert.That(expiring.currentOrder.id, Is.Not.EqualTo(oldOrderId));
+            Assert.That(game.Scoring.ActiveOrders.Count, Is.EqualTo(8));
+            Assert.That(game.Scoring.ActiveOrders.Any(order => order.id == oldOrderId), Is.False);
             Assert.That(expiring.remainingTime, Is.GreaterThan(0));
             Assert.That(other.requestedIngredient, Is.EqualTo(otherRequest));
-            Assert.That(other.remainingTime, Is.GreaterThan(18));
+            Assert.That(other.remainingTime, Is.GreaterThan(58));
 
             game.Restart();
             Assert.That(game.failedOrders, Is.Zero);
             Assert.That(game.finalScore, Is.Zero);
+            Assert.That(game.Scoring.ActiveOrders.Count, Is.EqualTo(8));
             Assert.That(expiring.remainingTime, Is.GreaterThan(0));
         }
 

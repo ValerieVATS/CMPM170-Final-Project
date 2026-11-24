@@ -8,7 +8,7 @@ namespace SmashBurger
         private const float barWidth = 1.35f;
 
         // Set the default on BurgerBreakout before Play, or override an individual table during Play.
-        [SerializeField, Min(0.1f)] private float orderDurationSeconds = 20f;
+        [SerializeField, Min(0.1f)] private float orderDurationSeconds = 60f;
 
         public float orderDuration
         {
@@ -17,6 +17,7 @@ namespace SmashBurger
         }
 
         public IngredientKind requestedIngredient { get; private set; }
+        public Order currentOrder { get; private set; }
         public float remainingTime => Mathf.Max(0, orderDuration - (Time.time - orderStartedAt));
 
         private BurgerBreakout game;
@@ -52,6 +53,7 @@ namespace SmashBurger
 
         public void ResetOrder()
         {
+            if (hasOrder) game.Scoring.CancelOrder(currentOrder);
             IngredientKind next;
             do
             {
@@ -61,6 +63,7 @@ namespace SmashBurger
             requestedIngredient = next;
             hasOrder = true;
             orderStartedAt = Time.time;
+            currentOrder = game.Scoring.PlaceOrder(next, orderStartedAt, orderDuration);
             requestLabel.text = IngredientInfo.Name(next).ToUpperInvariant();
             if (requestArt != null)
             {
@@ -74,9 +77,18 @@ namespace SmashBurger
 
         private void Update()
         {
-            if (!hasOrder) return;
+            if (!hasOrder || game.isGameOver) return;
+            SyncOrderDuration();
             if (remainingTime <= 0) ExpireOrder();
             UpdateTimerBar();
+        }
+
+        private void SyncOrderDuration()
+        {
+            // Inspector edits during Play should change both the visible bar and scoring deadline.
+            if (Mathf.Approximately(currentOrder.Patience, orderDuration)) return;
+            game.Scoring.CancelOrder(currentOrder);
+            currentOrder = game.Scoring.PlaceOrder(requestedIngredient, orderStartedAt, orderDuration);
         }
 
         private void UpdateTimerBar()
@@ -94,7 +106,10 @@ namespace SmashBurger
 
         public bool TryDeliver(BreakoutBall ball)
         {
-            if (ball == null || ball.IsHeld || ball.State == FoodState.Knockdown) return false;
+            if (game.isGameOver || ball == null || !ball.gameObject.activeInHierarchy || ball.IsHeld
+                || ball.State == FoodState.Knockdown)
+                return false;
+            SyncOrderDuration();
             if (remainingTime <= 0)
             {
                 ExpireOrder();
@@ -112,12 +127,17 @@ namespace SmashBurger
             }
             if (ball.Ingredient != requestedIngredient)
             {
-                game.Feedback("WRONG ORDER — this table wants " + IngredientInfo.Name(requestedIngredient).ToUpperInvariant(),
-                    BurgerBreakout.RawRed);
+                DeliveryResult wrong = game.Scoring.DeliverOrder(currentOrder, ball.Ingredient);
+                if (wrong.Scored)
+                    game.Feedback("WRONG ORDER — this table wants " + IngredientInfo.Name(requestedIngredient).ToUpperInvariant(),
+                        BurgerBreakout.RawRed);
                 return false;
             }
 
-            game.ScoreDelivery(ball.Ingredient, remainingTime / orderDuration);
+            DeliveryResult result = game.Scoring.DeliverOrder(currentOrder, ball.Ingredient);
+            if (!result.Scored || !result.Correct) return false;
+            game.Feedback("SERVED " + IngredientInfo.Name(ball.Ingredient).ToUpperInvariant()
+                + "  +" + result.Points, BurgerBreakout.Green);
             ball.Retire();
             ResetOrder();
             return true;
