@@ -110,7 +110,7 @@ namespace SmashBurger
 
         private void FixedUpdate()
         {
-            if (game == null || retiring || IsHeld) return;
+            if (game == null || retiring || IsHeld || !game.isPlaying) return;
             if (Body.position.y < BurgerBreakout.DrainY)
             {
                 game.Lose(this);
@@ -127,7 +127,7 @@ namespace SmashBurger
 
         private void OnCollisionEnter2D(Collision2D collision)
         {
-            if (retiring || IsHeld || game == null) return;
+            if (retiring || IsHeld || game == null || !game.isPlaying) return;
             if (collision.collider == game.PaddleCollider && Time.fixedTime - lastPaddleHit > 0.06f)
             {
                 // Only the paddle's upper surface should launch a ball upward.

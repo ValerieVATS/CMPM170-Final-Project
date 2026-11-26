@@ -29,7 +29,8 @@ namespace SmashBurger
 
         public int finalScore => Scoring != null ? Scoring.finalScore : 0;
         public int failedOrders { get; private set; }
-        public bool isGameOver { get; private set; }
+        public int ordersDelivered => Scoring != null ? Scoring.DeliveredCount : 0;
+        public int wrongDeliveries => Scoring != null ? Scoring.MistakeCount : 0;
         public float matchTimeRemaining => Mathf.Max(0, gameDurationSeconds - elapsed);
         public int MaxActiveIngredients => maxActiveIngredients;
         public int ActiveIngredientCount { get; private set; }
@@ -40,6 +41,13 @@ namespace SmashBurger
         public BreakoutBall LauncherBall { get; private set; }
         public BreakoutBall CaughtIngredient { get; private set; }
         public ScoringSystem Scoring { get; private set; }
+
+        public enum GamePhase { Intro, Playing, GameOver }
+
+        public GamePhase Phase { get; private set; } = GamePhase.Intro;
+        public bool isIntro => Phase == GamePhase.Intro;
+        public bool isPlaying => Phase == GamePhase.Playing;
+        public bool isGameOver => Phase == GamePhase.GameOver;
 
         private readonly List<BreakoutBall> balls = new List<BreakoutBall>();
         private readonly List<IngredientRack> racks = new List<IngredientRack>();
@@ -60,8 +68,11 @@ namespace SmashBurger
         private Color messageColor;
         private float messageUntil;
         private float elapsed;
-        private float timeScaleBeforeEnd;
+        private float pausedTimeScale = 1f;
+        private bool timePaused;
         private GUIStyle titleStyle, textStyle, smallStyle, scoreStyle;
+        private GUIStyle screenTitleStyle, screenSubtitleStyle, cardTitleStyle, bodyStyle, stepStyle;
+        private GUIStyle controlKeyStyle, controlValueStyle, promptStyle, statLabelStyle, statValueStyle;
 
         private void Awake()
         {
@@ -88,7 +99,7 @@ namespace SmashBurger
             font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             Scoring = gameObject.AddComponent<ScoringSystem>();
             BuildCourt();
-            Restart();
+            ShowIntro();
         }
 
         private void FitCamera()
@@ -253,10 +264,37 @@ namespace SmashBurger
             return ball;
         }
 
+        /// <summary>Resets to a fresh round and shows the title screen with the goal and controls.
+        /// The match clock and table orders stay paused until <see cref="StartGame"/>.</summary>
+        public void ShowIntro()
+        {
+            ResumeTime();
+            PrepareRound(false);
+            Phase = GamePhase.Intro;
+            if (guide != null) guide.enabled = false;
+        }
+
+        /// <summary>Starts a fresh match from the title screen.</summary>
+        public void StartGame()
+        {
+            if (Phase == GamePhase.Playing) return;
+            Restart();
+        }
+
+        /// <summary>Resets every score, order and ingredient, then resumes play.</summary>
         public void Restart()
         {
-            if (isGameOver) Time.timeScale = timeScaleBeforeEnd;
-            isGameOver = false;
+            ResumeTime();
+            // Ignore the pointer jump that would otherwise teleport the paddle on the first frame.
+            Mouse mouse = Mouse.current;
+            if (mouse != null) lastMousePosition = mouse.position.ReadValue();
+            PrepareRound(true);
+            Phase = GamePhase.Playing;
+            Feedback("Launch the pickle. Paddle edges give steeper bank shots.", Cream);
+        }
+
+        private void PrepareRound(bool openTables)
+        {
             elapsed = 0;
             if (Scoring != null) Scoring.ResetScore();
             foreach (BreakoutBall ball in balls.ToArray())
@@ -264,24 +302,44 @@ namespace SmashBurger
             balls.Clear();
             ActiveIngredientCount = 0;
             CaughtIngredient = null;
+            catchHeld = false;
+            aimDirection = Vector2.up;
             failedOrders = 0;
+            messageUntil = 0;
             foreach (IngredientRack rack in racks) rack.Restock();
-            foreach (DiningTable table in tables) table.ResetOrder();
+            foreach (DiningTable table in tables)
+            {
+                if (openTables) table.ResetOrder();
+                else table.ClearOrder();
+            }
             targetX = 0;
             paddle.position = new Vector2(0, -4.35f);
             LauncherBall = SpawnBall(FoodState.Knockdown, HoldPosition(0.19f));
             LauncherBall.Hold();
-            Feedback("Launch the pickle. Paddle edges give steeper bank shots.", Cream);
+        }
+
+        private void SuspendTime()
+        {
+            if (timePaused) return;
+            pausedTimeScale = Time.timeScale;
+            Time.timeScale = 0;
+            timePaused = true;
+        }
+
+        private void ResumeTime()
+        {
+            if (!timePaused) return;
+            Time.timeScale = pausedTimeScale;
+            timePaused = false;
         }
 
         private void EndGame()
         {
-            if (isGameOver) return;
+            if (Phase == GamePhase.GameOver) return;
             elapsed = gameDurationSeconds;
-            isGameOver = true;
-            guide.enabled = false;
-            timeScaleBeforeEnd = Time.timeScale;
-            Time.timeScale = 0;
+            Phase = GamePhase.GameOver;
+            if (guide != null) guide.enabled = false;
+            SuspendTime();
         }
 
         public void Forget(BreakoutBall ball)
@@ -298,7 +356,7 @@ namespace SmashBurger
             {
                 ball.Hold();
                 ball.PlaceHeld(HoldPosition(ball.Radius));
-                Feedback("Pickle ready — click or Space to relaunch.", Green);
+                Feedback("Pickle ready.", Green);
             }
             else
             {
@@ -318,7 +376,7 @@ namespace SmashBurger
                 CaughtIngredient = ball;
                 ball.Hold();
                 ball.PlaceHeld(HoldPosition(ball.Radius));
-                Feedback("CAUGHT — point above the paddle; release to aim", Cream);
+                Feedback("CAUGHT — line up your shot", Cream);
                 return;
             }
             ball.Launch(BreakoutAim.FromPaddle(ball.Body.position.x - paddle.position.x, paddleWidth * 0.5f, maxBounceAngle));
@@ -340,18 +398,29 @@ namespace SmashBurger
         {
             FitCamera();
             Keyboard keyboard = Keyboard.current;
-            if (isGameOver)
+            Mouse mouse = Mouse.current;
+
+            if (Phase == GamePhase.Intro)
             {
-                if (keyboard != null && keyboard.rKey.wasPressedThisFrame) Restart();
+                if (ConfirmPressed(keyboard, mouse)
+                    || (keyboard != null && keyboard.rKey.wasPressedThisFrame))
+                    StartGame();
                 return;
             }
+            if (Phase == GamePhase.GameOver)
+            {
+                if (ConfirmPressed(keyboard, mouse)
+                    || (keyboard != null && keyboard.rKey.wasPressedThisFrame))
+                    Restart();
+                return;
+            }
+
             elapsed += Time.deltaTime;
             if (elapsed >= gameDurationSeconds)
             {
                 EndGame();
                 return;
             }
-            Mouse mouse = Mouse.current;
             Vector2 pointer = mouse != null ? mouse.position.ReadValue() : lastMousePosition;
             bool mouseMoved = (pointer - lastMousePosition).sqrMagnitude > 0.1f;
             Vector2 mouseWorld = view.ScreenToWorldPoint(pointer);
@@ -385,15 +454,25 @@ namespace SmashBurger
             UpdateGuide();
         }
 
+        private static bool ConfirmPressed(Keyboard keyboard, Mouse mouse)
+        {
+            if (mouse != null && mouse.leftButton.wasPressedThisFrame) return true;
+            if (keyboard == null) return false;
+            return keyboard.spaceKey.wasPressedThisFrame
+                || keyboard.enterKey.wasPressedThisFrame
+                || keyboard.numpadEnterKey.wasPressedThisFrame;
+        }
+
         private void FixedUpdate()
         {
-            if (isGameOver) return;
+            if (!isPlaying) return;
             paddle.MovePosition(new Vector2(Mathf.MoveTowards(paddle.position.x, targetX,
                 paddleSpeed * Time.fixedDeltaTime), -4.35f));
         }
 
         private void LateUpdate()
         {
+            if (!isPlaying) return;
             if (LauncherBall != null && LauncherBall.IsHeld) LauncherBall.PlaceHeld(HoldPosition(LauncherBall.Radius));
             if (CaughtIngredient != null) CaughtIngredient.PlaceHeld(HoldPosition(CaughtIngredient.Radius));
         }
@@ -408,7 +487,7 @@ namespace SmashBurger
         private void UpdateGuide()
         {
             guide.enabled = false;
-            if (!showAimGuide || isGameOver) return;
+            if (!showAimGuide || !isPlaying) return;
             Vector2 origin;
             Vector2 direction;
             Color color;
@@ -465,50 +544,198 @@ namespace SmashBurger
             return $"{seconds / 60}:{seconds % 60:00}";
         }
 
+        private void EnsureStyles()
+        {
+            if (titleStyle != null) return;
+            titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 27, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+            textStyle = new GUIStyle(GUI.skin.label) { fontSize = 17, alignment = TextAnchor.MiddleCenter };
+            smallStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
+            scoreStyle = new GUIStyle(GUI.skin.label) { fontSize = 24, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight };
+            screenTitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 56, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            screenSubtitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 18, alignment = TextAnchor.MiddleCenter };
+            cardTitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+            bodyStyle = new GUIStyle(GUI.skin.label) { fontSize = 19, alignment = TextAnchor.UpperLeft, wordWrap = true };
+            stepStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, alignment = TextAnchor.UpperLeft, wordWrap = true };
+            controlKeyStyle = new GUIStyle(GUI.skin.label) { fontSize = 17, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+            controlValueStyle = new GUIStyle(GUI.skin.label) { fontSize = 17, alignment = TextAnchor.MiddleLeft };
+            promptStyle = new GUIStyle(GUI.skin.label) { fontSize = 22, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            statLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
+            statValueStyle = new GUIStyle(GUI.skin.label) { fontSize = 30, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        }
+
         private void OnGUI()
         {
-            if (titleStyle == null)
-            {
-                titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 27, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
-                textStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, alignment = TextAnchor.MiddleCenter };
-                smallStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
-                scoreStyle = new GUIStyle(GUI.skin.label) { fontSize = 24, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight };
-            }
+            EnsureStyles();
             float scale = Mathf.Min(Screen.width / 1280f, Screen.height / 820f);
+            if (scale <= 0.0001f) return;
             Matrix4x4 previous = GUI.matrix;
             GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1));
             float width = Screen.width / scale;
             float height = Screen.height / scale;
+
+            if (Phase == GamePhase.Intro) DrawIntroScreen(width, height);
+            else if (Phase == GamePhase.GameOver) DrawGameOverScreen(width, height);
+            else DrawHud(width, height);
+
+            GUI.matrix = previous;
+        }
+
+        // In-match HUD: score and countdown only; the controls live on the intro screen.
+        private void DrawHud(float width, float height)
+        {
             titleStyle.normal.textColor = Cream;
             GUI.Label(new Rect(32, 13, 420, 42), "SMASH / BURGER", titleStyle);
             scoreStyle.normal.textColor = Gold;
             GUI.Label(new Rect(width - 450, 16, 418, 34), "SCORE  " + finalScore, scoreStyle);
 
             bool flashRed = matchTimeRemaining < 15 && (int)(Time.unscaledTime * 4) % 2 == 0;
-            titleStyle.normal.textColor = isGameOver || flashRed ? RawRed : Cream;
+            titleStyle.normal.textColor = flashRed ? RawRed : Cream;
             titleStyle.fontSize = 48;
             titleStyle.alignment = TextAnchor.MiddleCenter;
             GUI.Label(new Rect(0, 5, width, 60), FormatCountdown(matchTimeRemaining), titleStyle);
             titleStyle.fontSize = 27;
             titleStyle.alignment = TextAnchor.MiddleLeft;
 
-            smallStyle.alignment = TextAnchor.MiddleCenter;
-            textStyle.normal.textColor = isGameOver ? RawRed : Time.time < messageUntil ? messageColor : Cream;
-            GUI.Label(new Rect(20, height - 92, width - 40, 30), isGameOver
-                ? "TIME UP — FINAL SCORE " + finalScore + " — press R to play again"
-                : Time.time < messageUntil ? message
-                : "PICKLE knocks food down  /  PADDLE cooks it  /  SERVE the matching table order", textStyle);
+            textStyle.normal.textColor = Time.time < messageUntil ? messageColor : Cream;
+            GUI.Label(new Rect(20, height - 58, width - 40, 30), message, textStyle);
+        }
+
+        private void DrawIntroScreen(float width, float height)
+        {
+            DrawBackdrop(width, height);
+            float top = Mathf.Max(0f, (height - 820f) * 0.5f);
+            GUI.BeginGroup(new Rect(0, top, width, 820));
+
+            screenTitleStyle.normal.textColor = Gold;
+            GUI.Label(new Rect(0, 54, width, 70), "SMASH / BURGER", screenTitleStyle);
+            screenSubtitleStyle.normal.textColor = Cream;
+            GUI.Label(new Rect(0, 124, width, 28), "A break-the-kitchen serving game", screenSubtitleStyle);
+
+            float panelWidth = Mathf.Min(1000, width - 80);
+            float panelX = width * 0.5f - panelWidth * 0.5f;
+
+            DrawPanel(new Rect(panelX, 172, panelWidth, 232));
+            cardTitleStyle.normal.textColor = Gold;
+            GUI.Label(new Rect(panelX + 32, 186, 400, 24), "YOUR JOB", cardTitleStyle);
+            bodyStyle.normal.textColor = Cream;
+            GUI.Label(new Rect(panelX + 32, 214, panelWidth - 64, 58),
+                "Deliver each food order to the proper table before its order timer runs out. "
+                + "Fast, correct deliveries score more; expired orders are counted as misses.", bodyStyle);
+
+            float columnWidth = (panelWidth - 80) * 0.5f;
+            stepStyle.normal.textColor = new Color32(203, 219, 220, 255);
+            GUI.Label(new Rect(panelX + 32, 280, columnWidth, 46),
+                "1   Launch the pickle to knock an ingredient off its rack.", stepStyle);
+            GUI.Label(new Rect(panelX + 48 + columnWidth, 280, columnWidth, 46),
+                "2   Bounce the fallen food off your paddle to cook it.", stepStyle);
+            GUI.Label(new Rect(panelX + 32, 330, columnWidth, 46),
+                "3   Bank the cooked food into the table showing that item.", stepStyle);
+            GUI.Label(new Rect(panelX + 48 + columnWidth, 330, columnWidth, 46),
+                "4   Wrong tables bounce it back; missed orders expire.", stepStyle);
+
+            DrawPanel(new Rect(panelX, 420, panelWidth, 244));
+            cardTitleStyle.normal.textColor = Gold;
+            GUI.Label(new Rect(panelX + 32, 434, 400, 24), "CONTROLS", cardTitleStyle);
+
+            float rowY = 470;
+            ControlRow(panelX + 32, rowY, "Move paddle", "Mouse  •  A / D  •  Left / Right arrows", panelWidth - 64);
+            ControlRow(panelX + 32, rowY + 30, "Launch pickle", "Left click  •  Space", panelWidth - 64);
+            ControlRow(panelX + 32, rowY + 60, "Catch food", "Hold right click or Shift, then release to throw", panelWidth - 64);
+            ControlRow(panelX + 32, rowY + 90, "Aim guide", "G toggles the first-bounce preview", panelWidth - 64);
+            ControlRow(panelX + 32, rowY + 120, "Restart match", "R", panelWidth - 64);
+
+            smallStyle.alignment = TextAnchor.MiddleLeft;
             smallStyle.normal.textColor = new Color32(168, 188, 190, 255);
-            GUI.Label(new Rect(20, height - 61, width - 40, 24),
-                "Mouse or A/D / ← →: move     Click / Space: launch     Hold RMB / Shift: catch food, aim & release", smallStyle);
-            GUI.Label(new Rect(20, height - 38, width - 40, 24),
-                "G: aim guide " + (showAimGuide ? "ON" : "OFF") + "     R: reset     •     Expired orders: " + failedOrders + "     •     Fast, correct deliveries score more", smallStyle);
-            GUI.matrix = previous;
+            GUI.Label(new Rect(panelX + 32, 624, panelWidth - 64, 24),
+                "Cooked food must bounce off the paddle before it can be served.", smallStyle);
+            smallStyle.alignment = TextAnchor.MiddleCenter;
+
+            promptStyle.normal.textColor = Green;
+            GUI.Label(new Rect(0, 704, width, 36), "PRESS SPACE, ENTER, OR CLICK TO START", promptStyle);
+            smallStyle.normal.textColor = new Color32(168, 188, 190, 255);
+            GUI.Label(new Rect(0, 750, width, 24),
+                Mathf.RoundToInt(gameDurationSeconds / 60f) + "-minute match  •  " + tables.Count
+                + " tables  •  orders expire after " + Mathf.RoundToInt(tableOrderDuration) + " seconds", smallStyle);
+            GUI.EndGroup();
+        }
+
+        private void DrawGameOverScreen(float width, float height)
+        {
+            DrawBackdrop(width, height);
+            float top = Mathf.Max(0f, (height - 820f) * 0.5f);
+            GUI.BeginGroup(new Rect(0, top, width, 820));
+
+            screenTitleStyle.normal.textColor = RawRed;
+            GUI.Label(new Rect(0, 96, width, 74), "GAME OVER", screenTitleStyle);
+            screenSubtitleStyle.normal.textColor = new Color32(203, 219, 220, 255);
+            GUI.Label(new Rect(0, 170, width, 28), "Time's up — the dinner rush is over.", screenSubtitleStyle);
+
+            float panelWidth = Mathf.Min(620, width - 80);
+            float panelX = width * 0.5f - panelWidth * 0.5f;
+            DrawPanel(new Rect(panelX, 222, panelWidth, 178));
+            statLabelStyle.normal.textColor = new Color32(168, 188, 190, 255);
+            GUI.Label(new Rect(panelX, 240, panelWidth, 24), "FINAL SCORE", statLabelStyle);
+            statValueStyle.normal.textColor = Gold;
+            GUI.Label(new Rect(panelX, 268, panelWidth, 74), finalScore.ToString("N0"), statValueStyle);
+            smallStyle.normal.textColor = Cream;
+            GUI.Label(new Rect(panelX, 350, panelWidth, 24),
+                ordersDelivered + " correct  •  " + failedOrders + " expired  •  " + wrongDeliveries + " wrong table", smallStyle);
+
+            const float statWidth = 190;
+            const float statGap = 28;
+            const float statY = 444;
+            float startX = width * 0.5f - (statWidth * 3 + statGap * 2) * 0.5f;
+            DrawStat(startX, statY, "ORDERS DELIVERED", ordersDelivered);
+            DrawStat(startX + statWidth + statGap, statY, "ORDERS EXPIRED", failedOrders);
+            DrawStat(startX + (statWidth + statGap) * 2, statY, "WRONG TABLE", wrongDeliveries);
+
+            promptStyle.normal.textColor = Green;
+            GUI.Label(new Rect(0, 566, width, 36), "PRESS R, SPACE, ENTER, OR CLICK TO PLAY AGAIN", promptStyle);
+            smallStyle.normal.textColor = new Color32(168, 188, 190, 255);
+            GUI.Label(new Rect(0, 614, width, 24), "Fast, correct deliveries earn the biggest tips.", smallStyle);
+            GUI.EndGroup();
+        }
+
+        private void DrawStat(float x, float y, string label, int value)
+        {
+            statLabelStyle.normal.textColor = new Color32(168, 188, 190, 255);
+            GUI.Label(new Rect(x, y, 190, 22), label, statLabelStyle);
+            statValueStyle.normal.textColor = Cream;
+            GUI.Label(new Rect(x, y + 22, 190, 42), value.ToString("N0"), statValueStyle);
+        }
+
+        private void ControlRow(float x, float y, string key, string value, float width)
+        {
+            controlKeyStyle.normal.textColor = Cream;
+            GUI.Label(new Rect(x, y, 210, 26), key, controlKeyStyle);
+            controlValueStyle.normal.textColor = new Color32(246, 222, 178, 255);
+            GUI.Label(new Rect(x + 210, y, width - 210, 26), value, controlValueStyle);
+        }
+
+        private static void DrawBackdrop(float width, float height)
+        {
+            Fill(new Rect(0, 0, width, height), new Color(0.035f, 0.055f, 0.065f, 0.97f));
+            Fill(new Rect(0, 0, width, 4), Gold);
+            Fill(new Rect(0, height - 4, width, 4), Gold);
+        }
+
+        private static void DrawPanel(Rect rect)
+        {
+            Fill(rect, new Color(0.10f, 0.145f, 0.165f, 0.98f));
+            Fill(new Rect(rect.x, rect.y, rect.width, 2), new Color(0.96f, 0.71f, 0.30f, 0.55f));
+        }
+
+        private static void Fill(Rect rect, Color color)
+        {
+            Color previous = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = previous;
         }
 
         private void OnDestroy()
         {
-            if (isGameOver) Time.timeScale = timeScaleBeforeEnd;
+            if (timePaused) Time.timeScale = pausedTimeScale;
             foreach (Object asset in generatedAssets)
                 if (asset != null) Destroy(asset);
         }

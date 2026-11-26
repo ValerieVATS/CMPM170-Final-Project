@@ -19,6 +19,9 @@ namespace SmashBurger.Tests
             yield return new WaitForFixedUpdate();
             game = Object.FindFirstObjectByType<BurgerBreakout>();
             Assert.That(game, Is.Not.Null);
+            Assert.That(game.isIntro, Is.True, "The scene should open on the title screen.");
+            game.StartGame();
+            yield return new WaitForFixedUpdate();
         }
 
         private static IEnumerator Steps(int count)
@@ -35,6 +38,55 @@ namespace SmashBurger.Tests
         public void CountdownDisplaysMinutesAndSeconds(float remaining, string expected)
         {
             Assert.That(BurgerBreakout.FormatCountdown(remaining), Is.EqualTo(expected));
+        }
+
+        [UnityTest]
+        public IEnumerator TitleScreenShowsNoOrdersAndHoldsTheMatchClock()
+        {
+            game.ShowIntro();
+            Assert.That(game.isIntro, Is.True);
+            Assert.That(game.isPlaying, Is.False);
+            Assert.That(game.isGameOver, Is.False);
+            Assert.That(game.matchTimeRemaining, Is.EqualTo(600f));
+            Assert.That(game.finalScore, Is.Zero);
+            Assert.That(game.failedOrders, Is.Zero);
+            Assert.That(game.Scoring.ActiveOrders, Is.Empty);
+            Assert.That(game.ActiveIngredientCount, Is.Zero);
+            Assert.That(game.LauncherBall, Is.Not.Null);
+            Assert.That(game.LauncherBall.IsHeld, Is.True);
+            foreach (DiningTable table in Object.FindObjectsByType<DiningTable>(FindObjectsSortMode.None))
+                Assert.That(table.GetComponentInChildren<TextMesh>().text, Is.EqualTo("WAITING"));
+
+            yield return new WaitForSeconds(0.12f);
+            Assert.That(game.isIntro, Is.True);
+            Assert.That(game.matchTimeRemaining, Is.EqualTo(600f), "The match clock must stay frozen on the title screen.");
+            Assert.That(game.Scoring.ActiveOrders, Is.Empty);
+
+            game.StartGame();
+            Assert.That(game.isPlaying, Is.True, "Space, Enter or a click should start the match.");
+            Assert.That(game.matchTimeRemaining, Is.EqualTo(600f));
+            Assert.That(game.Scoring.ActiveOrders.Count, Is.EqualTo(8));
+            yield return new WaitForSeconds(0.12f);
+            Assert.That(game.matchTimeRemaining, Is.LessThan(600f));
+            Assert.That(game.matchTimeRemaining, Is.GreaterThan(599f));
+        }
+
+        [Test]
+        public void TitleScreenResetsAPartiallyPlayedRound()
+        {
+            DiningTable table = Object.FindFirstObjectByType<DiningTable>();
+            BreakoutBall served = game.SpawnBall(FoodState.Cooked, new Vector2(0, -2), null, table.requestedIngredient);
+            game.HitPaddle(served);
+            Assert.That(table.TryDeliver(served), Is.True);
+            Assert.That(game.finalScore, Is.GreaterThan(0));
+
+            game.ShowIntro();
+            Assert.That(game.isIntro, Is.True);
+            Assert.That(game.finalScore, Is.Zero);
+            Assert.That(game.Scoring.ActiveOrders, Is.Empty);
+            Assert.That(game.ActiveIngredientCount, Is.Zero);
+            Assert.That(Object.FindObjectsByType<IngredientRack>(FindObjectsSortMode.None).All(rack => rack.IsStocked), Is.True);
+            Assert.That(game.LauncherBall.IsHeld, Is.True);
         }
 
         [UnityTest]
@@ -66,6 +118,7 @@ namespace SmashBurger.Tests
                 yield return null;
 
                 Assert.That(game.isGameOver, Is.True);
+                Assert.That(game.Phase, Is.EqualTo(BurgerBreakout.GamePhase.GameOver));
                 Assert.That(game.matchTimeRemaining, Is.Zero);
                 Assert.That(BurgerBreakout.FormatCountdown(game.matchTimeRemaining), Is.EqualTo("0:00"));
                 Assert.That(Time.timeScale, Is.Zero);
@@ -81,6 +134,8 @@ namespace SmashBurger.Tests
 
                 game.Restart();
                 Assert.That(game.isGameOver, Is.False);
+                Assert.That(game.isPlaying, Is.True);
+                Assert.That(game.Phase, Is.EqualTo(BurgerBreakout.GamePhase.Playing));
                 Assert.That(Time.timeScale, Is.EqualTo(0.5f));
                 Assert.That(game.matchTimeRemaining, Is.EqualTo(600f));
                 Assert.That(game.finalScore, Is.Zero);

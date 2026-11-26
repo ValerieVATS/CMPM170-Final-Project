@@ -75,9 +75,26 @@ namespace SmashBurger
             UpdateTimerBar();
         }
 
+        /// <summary>Closes the table for the title screen: no request and no running timer.</summary>
+        public void ClearOrder()
+        {
+            if (hasOrder) game.Scoring.CancelOrder(currentOrder);
+            hasOrder = false;
+            currentOrder = default;
+            if (requestArt != null)
+            {
+                requestArt.SetActive(false);
+                Destroy(requestArt);
+                requestArt = null;
+            }
+            if (requestLabel != null) requestLabel.text = "WAITING";
+            timerFill.transform.localScale = new Vector3(barWidth, 0.09f, 1);
+            timerFill.transform.localPosition = new Vector2(0, 0.48f);
+        }
+
         private void Update()
         {
-            if (!hasOrder || game.isGameOver) return;
+            if (!hasOrder || !game.isPlaying) return;
             SyncOrderDuration();
             if (remainingTime <= 0) ExpireOrder();
             UpdateTimerBar();
@@ -106,7 +123,7 @@ namespace SmashBurger
 
         public bool TryDeliver(BreakoutBall ball)
         {
-            if (game.isGameOver || ball == null || !ball.gameObject.activeInHierarchy || ball.IsHeld
+            if (!game.isPlaying || ball == null || !ball.gameObject.activeInHierarchy || ball.IsHeld
                 || ball.State == FoodState.Knockdown)
                 return false;
             SyncOrderDuration();

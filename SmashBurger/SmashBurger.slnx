@@ -1,0 +1,5 @@
+﻿<Solution>
+  <Project Path="SmashBurger.Runtime.csproj" />
+  <Project Path="SmashBurger.PlayModeTests.csproj" />
+  <Project Path="Assembly-CSharp-Editor.csproj" />
+</Solution>

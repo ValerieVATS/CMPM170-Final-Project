@@ -30,7 +30,7 @@ namespace SmashBurger
 
         public bool TryKnockDown()
         {
-            if (!IsStocked || game.ActiveIngredientCount >= game.MaxActiveIngredients) return false;
+            if (!game.isPlaying || !IsStocked || game.ActiveIngredientCount >= game.MaxActiveIngredients) return false;
             hitbox.enabled = false;
             art.SetActive(false);
             BreakoutBall ball = game.SpawnBall(FoodState.Raw,
